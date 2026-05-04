@@ -1900,58 +1900,76 @@ MainTab:Slider({
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local task = task -- ใช้ task library เพื่อความแม่นยำสูง
 
 local LocalPlayer = Players.LocalPlayer
 local DroppedItems = workspace:WaitForChild("DroppedItems")
 
-local Character
-local HRP
-
-local PICKUP_DISTANCE = 350
-local TOUCH_REPEAT = 25
+local Character, HRP
 local pickupEnabled = false
 
+-- [[ CONFIGURATION ]] --
+local SETTINGS = {
+    PICKUP_DISTANCE = 1500, -- เพิ่มระยะให้ไกลขึ้น (ปรับได้ตามต้องการ)
+    TOUCH_REPEAT = 5,      -- ลดลงเหลือ 5 (เพื่อลด Network Lag แต่ยังติดง่ายอยู่)
+    COOLDOWN = 0.1         -- ระยะห่างการเช็คแต่ละรอบ (วินาที) เพื่อลด CPU Usage
+}
 
 local function bindCharacter(char)
     Character = char
-    HRP = char:WaitForChild("HumanoidRootPart", 5)
+    HRP = char:WaitForChild("HumanoidRootPart", 10)
 end
 
-if LocalPlayer.Character then
-    bindCharacter(LocalPlayer.Character)
-end
+if LocalPlayer.Character then bindCharacter(LocalPlayer.Character) end
 LocalPlayer.CharacterAdded:Connect(bindCharacter)
 
-
-local function firetouch(partA, partB)
-    if not firetouchinterest or not partA or not partB then return end
-    for i = 1, TOUCH_REPEAT do
-        firetouchinterest(partA, partB, 0)
-        firetouchinterest(partA, partB, 1)
-    end
+-- ฟังก์ชันจำลองการสัมผัสที่รวดเร็วและแม่นยำ
+local function fastTouch(targetPart)
+    if not firetouchinterest or not HRP or not targetPart then return end
+    
+    task.spawn(function()
+        for i = 1, SETTINGS.TOUCH_REPEAT do
+            firetouchinterest(HRP, targetPart, 0) -- เริ่มสัมผัส
+            firetouchinterest(HRP, targetPart, 1) -- ปล่อยสัมผัส
+        end
+    end)
 end
 
-
-RunService.RenderStepped:Connect(function()
-    if not pickupEnabled then return end
-    if not HRP or not HRP.Parent then return end
-
-    for _, item in ipairs(DroppedItems:GetChildren()) do
-        local zone = item:FindFirstChild("PickUpZone")
-        if zone and zone:IsA("BasePart") then
-            local dist = (HRP.Position - zone.Position).Magnitude
-            if dist <= PICKUP_DISTANCE then
-                firetouch(zone, HRP)
+-- ลูปหลัก (ใช้ Stepped แทน RenderStepped เพื่อความเสถียรด้าน Physics)
+task.spawn(function()
+    while true do
+        task.wait(SETTINGS.COOLDOWN) -- ไม่ต้องรันทุกเฟรมเพื่อลดการกระตุก
+        
+        if pickupEnabled and HRP and HRP.Parent then
+            local items = DroppedItems:GetChildren()
+            
+            for i = 1, #items do
+                local item = items[i]
+                local zone = item:FindFirstChild("PickUpZone") or item:FindFirstChildWhichIsA("BasePart")
+                
+                if zone then
+                    -- คำนวณระยะทางแบบประหยัดทรัพยากร
+                    local dist = (HRP.Position - zone.Position).Magnitude
+                    
+                    if dist <= SETTINGS.PICKUP_DISTANCE then
+                        fastTouch(zone)
+                    end
+                end
             end
         end
     end
 end)
 
-
+-- Integration กับ UI ของคุณ
 MainTab:Toggle({
-    Title = "Pickup Item",
+    Title = "Premium Auto Pickup",
     Default = false,
     Callback = function(state)
         pickupEnabled = state
+        if state then
+            print("Auto Pickup: เปิด")
+        else
+            print("Auto Pickup: ปิด")
+        end
     end
 })
